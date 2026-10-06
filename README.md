@@ -1,8 +1,8 @@
-# Bandz Levels
+# Bandz Key Levels | NWOG, NDOG & ADR
 
 Free, open-source Pine Script v6 indicator by Bandz-ICT.
 
-Reference levels, opening gaps, scheduled opening prices, and Average Daily Range markers.
+Key reference levels, weekly/daily opening gaps, scheduled opens, and Average Daily Range.
 
 ## Install in TradingView
 
