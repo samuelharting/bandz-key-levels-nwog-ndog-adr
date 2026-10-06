@@ -1,0 +1,1458 @@
+//@version=6
+// Bandz Reference Levels — NWOG/NDOG + D/W/M/Y + ADR + Watermark
+indicator(title="Bandz Reference Levels + Gaps + ADR", shorttitle="Bandz Levels", overlay=true, max_bars_back=5000, max_lines_count=500, max_labels_count=500, max_boxes_count=500, dynamic_requests=true)
+
+// ============================================================================
+// ============================  TYPES (NWOG/NDOG)  ===========================
+// ============================================================================
+type Helper
+    string  name
+
+type Settings
+    bool    show
+    color   color
+    color   color_new
+    int     size
+    string  style
+    color   ce_color
+    color   ce_color_new
+    int     ce_size
+    string  ce_style
+    color   q25_color
+    color   q25_color_new
+    color   q75_color
+    color   q75_color_new
+    string  extend
+    bool    EH_show
+    color   EH_color
+    string  EH_style
+    int     EH_size
+    int     max_count
+    bool    use_background
+    color   background
+    color   background_new
+    bool    label_show
+    string  label_size
+    color   label_color
+    color   label_bgcolor
+
+type GapBox
+    line        top
+    label       l_top
+    line        q25
+    line        ce
+    line        q75
+    line        bottom
+    label       l_bottom
+    linefill    fill
+
+type Gap
+    string  name
+    string  date_name
+    float   open
+    float   middle
+    float   close
+    int     open_time
+    int     close_time
+    GapBox  box
+    bool    is_current  = false
+    bool    is_sunday   = false
+
+type OpenGap
+    Gap[]       gaps
+    Settings    settings
+    line        EventHorizon = na
+
+// ============================================================================
+// ============================  NWOG / NDOG INPUTS  ==========================
+// ============================================================================
+var nwog_gaps = array.new<Gap>()
+var OpenGap NWOG = OpenGap.new()
+NWOG.gaps     := nwog_gaps
+NWOG.settings := Settings.new()
+
+var ndog_gaps = array.new<Gap>()
+var OpenGap NDOG = OpenGap.new()
+NDOG.gaps     := ndog_gaps
+NDOG.settings := Settings.new()
+
+NWOG_Group = "NWOG (New Week Open Gap)"
+NDOG_Group = "NDOG (New Day Open Gap)"
+
+// ─── NWOG defaults from screenshots ───
+NWOG.settings.show := input.bool(true, "NWOG", group=NWOG_Group, inline="nwog1")
+nwogLineColor      = input.color(color.new(color.rgb(103, 58, 183), 0), "", group=NWOG_Group, inline="nwog1")
+NWOG.settings.style := input.string("⎯⎯⎯", "", options=["⎯⎯⎯", "----", "····"], group=NWOG_Group, inline="nwog1")
+NWOG.settings.size  := input.int(2, "", options=[1, 2, 3, 4], group=NWOG_Group, inline="nwog1")
+NWOG.settings.color_new := nwogLineColor
+NWOG.settings.color     := nwogLineColor
+
+nwogCEColor = input.color(color.new(color.rgb(103, 58, 183), 0), "C.E.", group=NWOG_Group, inline="nwogce")
+NWOG.settings.ce_style := input.string("⎯⎯⎯", "", options=["⎯⎯⎯", "----", "····"], group=NWOG_Group, inline="nwogce")
+NWOG.settings.ce_size  := input.int(2, "", options=[1, 2, 3, 4], group=NWOG_Group, inline="nwogce")
+NWOG.settings.ce_color_new := nwogCEColor
+NWOG.settings.ce_color     := nwogCEColor
+
+nwogQ25Color = input.color(color.new(color.rgb(64, 160, 96), 0), "25%", group=NWOG_Group, inline="nwog25")
+NWOG.settings.q25_color_new := nwogQ25Color
+NWOG.settings.q25_color     := nwogQ25Color
+
+nwogQ75Color = input.color(color.new(color.rgb(64, 160, 96), 0), "75%", group=NWOG_Group, inline="nwog75")
+NWOG.settings.q75_color_new := nwogQ75Color
+NWOG.settings.q75_color     := nwogQ75Color
+
+NWOG.settings.EH_show  := input.bool(false, "Event Horizon", group=NWOG_Group, inline="nwogeh")
+NWOG.settings.EH_color := input.color(color.new(color.rgb(156, 39, 176), 20), "", group=NWOG_Group, inline="nwogeh")
+NWOG.settings.EH_style := input.string("----", "", options=["⎯⎯⎯", "----", "····"], group=NWOG_Group, inline="nwogeh")
+NWOG.settings.EH_size  := input.int(1, "", options=[1, 2, 3, 4], group=NWOG_Group, inline="nwogeh")
+
+NWOG.settings.use_background := input.bool(true, "Background", group=NWOG_Group, inline="nwogbg")
+nwogBgColor = input.color(color.new(color.rgb(103, 58, 183), 93), "", group=NWOG_Group, inline="nwogbg")
+NWOG.settings.background_new := nwogBgColor
+NWOG.settings.background     := nwogBgColor
+
+NWOG.settings.label_show    := input.bool(true, "Label", group=NWOG_Group, inline="nwoglabel")
+NWOG.settings.label_color   := input.color(color.black, "", group=NWOG_Group, inline="nwoglabel")
+NWOG.settings.label_bgcolor := input.color(color.new(color.rgb(54, 58, 69), 100), "", group=NWOG_Group, inline="nwoglabel")
+NWOG.settings.label_size    := input.string(size.tiny, "", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge], group=NWOG_Group, inline="nwoglabel")
+
+NWOG.settings.max_count := input.int(2, "Maximum number", 1, 50, group=NWOG_Group)
+NWOG.settings.extend    := input.string("Always", "Extend Gaps", options=["Always", "Above and below only", "Any that is near current price"], group=NWOG_Group)
+
+// ─── NDOG defaults from screenshots ───
+NDOG.settings.show := input.bool(true, "NDOG", group=NDOG_Group, inline="ndog1")
+ndogLineColor      = input.color(color.new(color.rgb(46, 46, 46), 0), "", group=NDOG_Group, inline="ndog1")
+NDOG.settings.style := input.string("⎯⎯⎯", "", options=["⎯⎯⎯", "----", "····"], group=NDOG_Group, inline="ndog1")
+NDOG.settings.size  := input.int(1, "", options=[1, 2, 3, 4], group=NDOG_Group, inline="ndog1")
+NDOG.settings.color_new := ndogLineColor
+NDOG.settings.color     := ndogLineColor
+
+ndogCEColor = input.color(color.new(color.rgb(46, 46, 46), 0), "C.E.", group=NDOG_Group, inline="ndogce")
+NDOG.settings.ce_style := input.string("⎯⎯⎯", "", options=["⎯⎯⎯", "----", "····"], group=NDOG_Group, inline="ndogce")
+NDOG.settings.ce_size  := input.int(1, "", options=[1, 2, 3, 4], group=NDOG_Group, inline="ndogce")
+NDOG.settings.ce_color_new := ndogCEColor
+NDOG.settings.ce_color     := ndogCEColor
+
+ndogQ25Color = input.color(color.new(color.rgb(128, 128, 128), 0), "25%", group=NDOG_Group, inline="ndog25")
+NDOG.settings.q25_color_new := ndogQ25Color
+NDOG.settings.q25_color     := ndogQ25Color
+
+ndogQ75Color = input.color(color.new(color.rgb(128, 128, 128), 0), "75%", group=NDOG_Group, inline="ndog75")
+NDOG.settings.q75_color_new := ndogQ75Color
+NDOG.settings.q75_color     := ndogQ75Color
+
+NDOG.settings.use_background := input.bool(true, "Background", group=NDOG_Group, inline="ndogbg")
+ndogBgColor = input.color(color.new(color.rgb(46, 46, 46), 93), "", group=NDOG_Group, inline="ndogbg")
+NDOG.settings.background_new := ndogBgColor
+NDOG.settings.background     := ndogBgColor
+
+NDOG.settings.label_show    := input.bool(true, "Label", group=NDOG_Group, inline="ndoglabel")
+NDOG.settings.label_color   := input.color(color.black, "", group=NDOG_Group, inline="ndoglabel")
+NDOG.settings.label_bgcolor := input.color(color.new(color.rgb(54, 58, 69), 100), "", group=NDOG_Group, inline="ndoglabel")
+NDOG.settings.label_size    := input.string(size.tiny, "", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge], group=NDOG_Group, inline="ndoglabel")
+
+NDOG.settings.max_count := input.int(1, "Maximum number", 1, 50, group=NDOG_Group)
+NDOG.settings.extend    := input.string("Always", "Extend Gaps", options=["Always", "Above and below only", "Any that is near current price"], group=NDOG_Group)
+
+distance     = input.int(1000, "Number of candles to use in calculation", group="NWOG/NDOG Advanced")
+factor       = input.float(10, "Factor multiplier for distance test", group="NWOG/NDOG Advanced")
+buffer_bars  = input.int(10, "Extension bars (buffer)", minval=1, maxval=500, step=1, group="NWOG/NDOG Advanced", tooltip="Number of bars to extend lines past current candle")
+
+show_mid_level             = input.bool(true, "Show 50% level", group="NWOG/NDOG Advanced")
+min_gap_ticks_for_mid      = input.int(1, "Min gap size for 50% level (ticks)", minval=1, group="NWOG/NDOG Advanced", tooltip="Set to 1 to show the 50% level on basically every real gap.")
+show_quarter_levels        = input.bool(true, "Show 25%/75% levels", group="NWOG/NDOG Advanced")
+min_gap_ticks_for_quarters = input.int(50, "Min gap size for 25%/75% levels (ticks)", minval=1, group="NWOG/NDOG Advanced", tooltip="Quarter levels only draw when the gap is at least this many ticks.")
+
+atrf = ta.atr(distance) + (ta.stdev(high - low, distance) * factor)
+
+f_get_time_delta() =>
+    int tf_seconds = timeframe.in_seconds(timeframe.period)
+    int chart_ms_per_bar = tf_seconds * 1000
+    chart_ms_per_bar
+
+var int ms_per_bar = f_get_time_delta()
+
+var float[] median = array.new_float()
+length = 500
+median.unshift(high - low)
+if median.size() > length
+    median.pop()
+float spacing = ta.sma(ta.sma(median.median(), length), length) * .5
+
+// ============================================================================
+// ============================  NWOG/NDOG FUNCTIONS  =========================
+// ============================================================================
+f_get_line_style(string style) =>
+    switch style
+        '⎯⎯⎯'  => line.style_solid
+        '----' => line.style_dashed
+        '····' => line.style_dotted
+        => line.style_solid
+
+f_format_date(t) =>
+    _month = month(t)
+    _day = dayofmonth(t)
+    _year = year(t) % 100
+    str.format("{0,number,00}/{1,number,00}/{2,number,00}", _month, _day, _year)
+
+f_get_end_time() =>
+    time + (ms_per_bar * buffer_bars)
+
+method AbovePrice(Gap[] gaps, price) =>
+    float delta = -1
+    size = gaps.size()
+    Gap _return = na
+    if size > 0
+        for i = size - 1 to 0
+            Gap ng = gaps.get(i)
+            float mark = math.max(ng.open, ng.close)
+            if price < mark
+                ndelta = math.abs(mark - price)
+                delta := delta == -1 ? ndelta : delta
+                if ndelta <= delta
+                    delta := ndelta
+                    _return := ng
+    _return
+
+method BelowPrice(Gap[] gaps, price) =>
+    float delta = -1
+    size = gaps.size()
+    Gap _return = na
+    if size > 0
+        for i = 0 to size - 1
+            Gap ng = gaps.get(i)
+            float mark = math.min(ng.open, ng.close)
+            if price > mark
+                ndelta = math.abs(price - mark)
+                delta := delta == -1 ? ndelta : delta
+                if ndelta <= delta
+                    delta := ndelta
+                    _return := ng
+    _return
+
+method render(Gap gap, Settings settings) =>
+    float gapHigh  = math.max(gap.open, gap.close)
+    float gapLow   = math.min(gap.open, gap.close)
+    float gapRange = gapHigh - gapLow
+    float middle   = gapLow + gapRange * 0.50
+    float q25      = gapLow + gapRange * 0.25
+    float q75      = gapLow + gapRange * 0.75
+    float gapTicks = math.abs(gap.open - gap.close) / syminfo.mintick
+
+    bool showMidLevelNow      = show_mid_level and gapTicks >= min_gap_ticks_for_mid
+    bool showQuarterLevelsNow = show_quarter_levels and gapTicks >= min_gap_ticks_for_quarters and showMidLevelNow
+
+    int end_time = f_get_end_time()
+
+    // One live color source per item. This fixes the old/current color mismatch.
+    color lineColor = settings.color
+    color ceColor   = settings.ce_color
+    color q25Color  = settings.q25_color
+    color q75Color  = settings.q75_color
+    color bgColor   = settings.background
+
+    bool skipSundayNDOG = str.contains(gap.name, "NDOG") and gap.is_sunday
+
+    if skipSundayNDOG
+        if not na(gap.box)
+            if not na(gap.box.top)
+                line.delete(gap.box.top)
+            if not na(gap.box.q25)
+                line.delete(gap.box.q25)
+            if not na(gap.box.ce)
+                line.delete(gap.box.ce)
+            if not na(gap.box.q75)
+                line.delete(gap.box.q75)
+            if not na(gap.box.bottom)
+                line.delete(gap.box.bottom)
+            if not na(gap.box.fill)
+                linefill.delete(gap.box.fill)
+            label.delete(gap.box.l_top)
+            label.delete(gap.box.l_bottom)
+            gap.box := na
+    else
+        if na(gap.box)
+            gap.box        := GapBox.new()
+            gap.box.top    := line.new(gap.open_time, gapHigh, end_time, gapHigh, xloc=xloc.bar_time, color=lineColor, width=settings.size, style=f_get_line_style(settings.style))
+            gap.box.bottom := line.new(gap.open_time, gapLow, end_time, gapLow, xloc=xloc.bar_time, color=lineColor, width=settings.size, style=f_get_line_style(settings.style))
+
+            if showMidLevelNow
+                gap.box.ce := line.new(gap.open_time, middle, end_time, middle, xloc=xloc.bar_time, color=ceColor, width=settings.ce_size, style=f_get_line_style(settings.ce_style))
+
+            if showQuarterLevelsNow
+                gap.box.q25 := line.new(gap.open_time, q25, end_time, q25, xloc=xloc.bar_time, color=q25Color, width=settings.ce_size, style=f_get_line_style(settings.ce_style))
+                gap.box.q75 := line.new(gap.open_time, q75, end_time, q75, xloc=xloc.bar_time, color=q75Color, width=settings.ce_size, style=f_get_line_style(settings.ce_style))
+
+            if settings.use_background
+                gap.box.fill := linefill.new(gap.box.top, gap.box.bottom, bgColor)
+        else
+            line.set_xy1(gap.box.top, gap.open_time, gapHigh)
+            line.set_xy2(gap.box.top, end_time, gapHigh)
+            line.set_xy1(gap.box.bottom, gap.open_time, gapLow)
+            line.set_xy2(gap.box.bottom, end_time, gapLow)
+
+            line.set_color(gap.box.top, lineColor)
+            line.set_color(gap.box.bottom, lineColor)
+            line.set_style(gap.box.top, f_get_line_style(settings.style))
+            line.set_style(gap.box.bottom, f_get_line_style(settings.style))
+            line.set_width(gap.box.top, settings.size)
+            line.set_width(gap.box.bottom, settings.size)
+
+            if showMidLevelNow
+                if na(gap.box.ce)
+                    gap.box.ce := line.new(gap.open_time, middle, end_time, middle, xloc=xloc.bar_time, color=ceColor, width=settings.ce_size, style=f_get_line_style(settings.ce_style))
+                else
+                    line.set_xy1(gap.box.ce, gap.open_time, middle)
+                    line.set_xy2(gap.box.ce, end_time, middle)
+                    line.set_color(gap.box.ce, ceColor)
+                    line.set_style(gap.box.ce, f_get_line_style(settings.ce_style))
+                    line.set_width(gap.box.ce, settings.ce_size)
+            else
+                if not na(gap.box.ce)
+                    line.delete(gap.box.ce)
+                    gap.box.ce := na
+
+            if showQuarterLevelsNow
+                if na(gap.box.q25)
+                    gap.box.q25 := line.new(gap.open_time, q25, end_time, q25, xloc=xloc.bar_time, color=q25Color, width=settings.ce_size, style=f_get_line_style(settings.ce_style))
+                else
+                    line.set_xy1(gap.box.q25, gap.open_time, q25)
+                    line.set_xy2(gap.box.q25, end_time, q25)
+                    line.set_color(gap.box.q25, q25Color)
+                    line.set_style(gap.box.q25, f_get_line_style(settings.ce_style))
+                    line.set_width(gap.box.q25, settings.ce_size)
+
+                if na(gap.box.q75)
+                    gap.box.q75 := line.new(gap.open_time, q75, end_time, q75, xloc=xloc.bar_time, color=q75Color, width=settings.ce_size, style=f_get_line_style(settings.ce_style))
+                else
+                    line.set_xy1(gap.box.q75, gap.open_time, q75)
+                    line.set_xy2(gap.box.q75, end_time, q75)
+                    line.set_color(gap.box.q75, q75Color)
+                    line.set_style(gap.box.q75, f_get_line_style(settings.ce_style))
+                    line.set_width(gap.box.q75, settings.ce_size)
+            else
+                if not na(gap.box.q25)
+                    line.delete(gap.box.q25)
+                    gap.box.q25 := na
+                if not na(gap.box.q75)
+                    line.delete(gap.box.q75)
+                    gap.box.q75 := na
+
+            if settings.use_background
+                if na(gap.box.fill)
+                    gap.box.fill := linefill.new(gap.box.top, gap.box.bottom, bgColor)
+                else
+                    linefill.set_color(gap.box.fill, bgColor)
+            else
+                if not na(gap.box.fill)
+                    linefill.delete(gap.box.fill)
+                    gap.box.fill := na
+
+        // Force current input colors onto already-created NWOG/NDOG objects every redraw.
+        // This is the key fix for NDOG/label colors not updating after changing settings.
+        if not na(gap.box.top)
+            line.set_color(gap.box.top, lineColor)
+        if not na(gap.box.bottom)
+            line.set_color(gap.box.bottom, lineColor)
+        if not na(gap.box.ce)
+            line.set_color(gap.box.ce, ceColor)
+        if not na(gap.box.q25)
+            line.set_color(gap.box.q25, q25Color)
+        if not na(gap.box.q75)
+            line.set_color(gap.box.q75, q75Color)
+        if not na(gap.box.fill)
+            linefill.set_color(gap.box.fill, bgColor)
+
+        if settings.label_show
+            string labelText = str.format("{0} {1}", gap.name, gap.date_name)
+            if na(gap.box.l_top)
+                gap.box.l_top := label.new(end_time, gap.middle, labelText, style=label.style_label_left, xloc=xloc.bar_time, size=settings.label_size, color=settings.label_bgcolor, textcolor=settings.label_color)
+            else
+                label.set_x(gap.box.l_top, end_time)
+                label.set_y(gap.box.l_top, gap.middle)
+                label.set_text(gap.box.l_top, labelText)
+                label.set_style(gap.box.l_top, label.style_label_left)
+                label.set_size(gap.box.l_top, settings.label_size)
+                label.set_color(gap.box.l_top, settings.label_bgcolor)
+                label.set_textcolor(gap.box.l_top, settings.label_color)
+
+            if not na(gap.box.l_bottom)
+                label.delete(gap.box.l_bottom)
+                gap.box.l_bottom := na
+        else
+            if not na(gap.box.l_top)
+                label.delete(gap.box.l_top)
+                gap.box.l_top := na
+            if not na(gap.box.l_bottom)
+                label.delete(gap.box.l_bottom)
+                gap.box.l_bottom := na
+    gap
+
+method reset(Gap gap) =>
+    if not na(gap.box)
+        if not na(gap.box.top)
+            line.delete(gap.box.top)
+        if not na(gap.box.q25)
+            line.delete(gap.box.q25)
+        if not na(gap.box.ce)
+            line.delete(gap.box.ce)
+        if not na(gap.box.q75)
+            line.delete(gap.box.q75)
+        if not na(gap.box.bottom)
+            line.delete(gap.box.bottom)
+        if not na(gap.box.fill)
+            linefill.delete(gap.box.fill)
+        label.delete(gap.box.l_top)
+        label.delete(gap.box.l_bottom)
+        gap.box := na
+
+method Add(OpenGap GAP, string name, float o, float c, int t, int t1, int tt) =>
+    gap = Gap.new()
+    gap.name       := name
+    gap.date_name  := f_format_date(tt)
+    gap.open       := c
+    gap.close      := o
+    gap.middle     := (o + c) / 2
+    gap.open_time  := t1
+    gap.close_time := t
+    gap.is_sunday  := dayofweek == dayofweek.sunday
+    GAP.gaps.unshift(gap)
+
+    if GAP.gaps.size() > GAP.settings.max_count
+        g = GAP.gaps.pop()
+        g.reset()
+    GAP
+
+method Redraw(OpenGap GAP) =>
+    int end_time = f_get_end_time()
+
+    if GAP.gaps.size() > 0
+        for i = 0 to GAP.gaps.size() - 1
+            g = GAP.gaps.get(i)
+            g.is_current := i == 0
+
+            switch GAP.settings.extend
+                "Always" =>
+                    g.render(GAP.settings)
+                "Above and below only" =>
+                    g.reset()
+                "Any that is near current price" =>
+                    t = math.min(g.open, g.close) - high
+                    l = low - math.max(g.open, g.close)
+                    if (t > 0 and t < atrf) or (l > 0 and l < atrf)
+                        g.render(GAP.settings)
+                    else
+                        g.reset()
+
+        if GAP.settings.extend == "Above and below only" or GAP.settings.EH_show
+            prev = GAP.gaps.AbovePrice(close)
+            next = GAP.gaps.BelowPrice(close)
+
+            if GAP.settings.extend == "Above and below only"
+                if not na(prev)
+                    prev.render(GAP.settings)
+                if not na(next)
+                    next.render(GAP.settings)
+
+            if GAP.settings.EH_show
+                if not na(prev) and not na(next) and math.min(prev.open, prev.close) > math.max(next.open, next.close)
+                    middleEH = (math.min(prev.open, prev.close) + math.max(next.open, next.close)) / 2
+                    if na(GAP.EventHorizon)
+                        GAP.EventHorizon := line.new(math.max(prev.open_time, next.open_time), middleEH, end_time, middleEH, xloc=xloc.bar_time, color=GAP.settings.EH_color, width=GAP.settings.EH_size, style=f_get_line_style(GAP.settings.EH_style))
+                    else
+                        line.set_xy1(GAP.EventHorizon, math.max(prev.open_time, next.open_time), middleEH)
+                        line.set_xy2(GAP.EventHorizon, end_time, middleEH)
+                        line.set_color(GAP.EventHorizon, GAP.settings.EH_color)
+                        line.set_style(GAP.EventHorizon, f_get_line_style(GAP.settings.EH_style))
+                        line.set_width(GAP.EventHorizon, GAP.settings.EH_size)
+                else
+                    if not na(GAP.EventHorizon)
+                        line.delete(GAP.EventHorizon)
+                        GAP.EventHorizon := na
+            else
+                if not na(GAP.EventHorizon)
+                    line.delete(GAP.EventHorizon)
+                    GAP.EventHorizon := na
+    else
+        if not na(GAP.EventHorizon)
+            line.delete(GAP.EventHorizon)
+            GAP.EventHorizon := na
+    GAP
+
+// ============================================================================
+// ============================  NWOG/NDOG MAIN  ==============================
+// ============================================================================
+dailyBarTime = time("1D")
+isNewDay     = ta.change(dailyBarTime) != 0
+is_sunday    = dayofweek == dayofweek.sunday
+
+// Add gaps only on confirmed bars so they do not duplicate.
+// Redraw on every bar so color/style/extension changes update immediately.
+if NWOG.settings.show and timeframe.isintraday
+    if bar_index > 0 and barstate.isconfirmed and not is_sunday[1] and is_sunday
+        NWOG.Add("NWOG", open, close[1], time, time[1], time)
+    NWOG.Redraw()
+
+if NDOG.settings.show and timeframe.isintraday
+    bool isSundaySession = dayofweek == dayofweek.sunday
+    if barstate.isconfirmed and isNewDay and not isSundaySession and open != close[1]
+        NDOG.Add("NDOG", open, close[1], time, time[1], time)
+    NDOG.Redraw()
+
+// ============================================================================
+// ============================  WATERMARK  ===================================
+// ============================================================================
+wmShow        = input.bool(true, "Show Watermark", group="Watermark")
+title_text    = input.string("Bandz", "Title", group="Watermark - Text")
+subtitle_text = input.string("", "Subtitle", group="Watermark - Text")
+
+symInfoCheck = input.bool(false, "Show Symbol Info", group="Watermark - Symbol Info")
+
+textVPos = input.string("top", "Text Vertical Position", options=["top", "middle", "bottom"], group="Watermark - Position")
+textHPos = input.string("right", "Text Horizontal Position", options=["left", "center", "right"], group="Watermark - Position")
+
+symVPos = input.string("middle", "Symbol Vertical Position", options=["top", "middle", "bottom"], group="Watermark - Position")
+symHPos = input.string("center", "Symbol Horizontal Position", options=["left", "center", "right"], group="Watermark - Position")
+
+cellWidth  = input.int(0, "Cell Width (%)", minval=0, maxval=100, group="Watermark - Cell Size")
+cellHeight = input.int(0, "Cell Height (%)", minval=0, maxval=100, group="Watermark - Cell Size")
+
+c_title = input.color(color.new(color.black, 0), "Title Color", group="Watermark - Title")
+s_title = input.string("normal", "Title Size", options=["tiny", "small", "normal", "large", "huge", "auto"], group="Watermark - Title")
+a_title = input.string("center", "Title Alignment", options=["center", "left", "right"], group="Watermark - Title")
+
+c_subtitle = input.color(color.new(color.rgb(54, 58, 69), 60), "Subtitle Color", group="Watermark - Subtitle")
+s_subtitle = input.string("tiny", "Subtitle Size", options=["tiny", "small", "normal", "large", "huge", "auto"], group="Watermark - Subtitle")
+a_subtitle = input.string("center", "Subtitle Alignment", options=["center", "left", "right"], group="Watermark - Subtitle")
+
+c_symInfo = input.color(color.new(color.rgb(41, 98, 255), 0), "Symbol Info Color", group="Watermark - Symbol Info")
+s_symInfo = input.string("normal", "Symbol Info Size", options=["tiny", "small", "normal", "large", "huge", "auto"], group="Watermark - Symbol Info")
+a_symInfo = input.string("center", "Symbol Info Alignment", options=["center", "left", "right"], group="Watermark - Symbol Info")
+
+c_bg = input.color(color.new(color.rgb(54, 58, 69), 100), "Background Color", group="Watermark - Background")
+
+// Original Bandz watermark renderer. It owns two independently positioned
+// panels so the branding text and market information retain their controls.
+bandz_watermark_size(string selection) =>
+    switch selection
+        "auto"   => size.auto
+        "huge"   => size.huge
+        "large"  => size.large
+        "small"  => size.small
+        "tiny"   => size.tiny
+        => size.normal
+
+bandz_watermark_alignment(string selection) =>
+    switch selection
+        "left"  => text.align_left
+        "right" => text.align_right
+        => text.align_center
+
+bandz_watermark_position(string vertical, string horizontal) =>
+    result = position.bottom_right
+    if vertical == "top"
+        result := horizontal == "left" ? position.top_left : horizontal == "center" ? position.top_center : position.top_right
+    else if vertical == "middle"
+        result := horizontal == "left" ? position.middle_left : horizontal == "center" ? position.middle_center : position.middle_right
+    else
+        result := horizontal == "left" ? position.bottom_left : horizontal == "center" ? position.bottom_center : position.bottom_right
+    result
+
+type BandzWatermarkPanels
+    table branding
+    table marketInfo
+
+var BandzWatermarkPanels bandzWatermark = BandzWatermarkPanels.new(
+     table.new(bandz_watermark_position(textVPos, textHPos), 1, 2, border_width = 0),
+     table.new(bandz_watermark_position(symVPos, symHPos), 1, 2, border_width = 0))
+
+bandz_render_watermark(BandzWatermarkPanels panels) =>
+    table.clear(panels.branding, 0, 0, 0, 1)
+    table.clear(panels.marketInfo, 0, 0, 0, 1)
+
+    if wmShow
+        table.cell(panels.branding, 0, 0, title_text, width = cellWidth, height = cellHeight, text_color = c_title, text_halign = bandz_watermark_alignment(a_title), text_size = bandz_watermark_size(s_title), bgcolor = c_bg)
+        table.cell(panels.branding, 0, 1, subtitle_text, width = cellWidth, height = cellHeight, text_color = c_subtitle, text_halign = bandz_watermark_alignment(a_subtitle), text_size = bandz_watermark_size(s_subtitle), bgcolor = c_bg)
+
+        if symInfoCheck
+            string displayedTimeframe = timeframe.isminutes ? timeframe.period + "m" : timeframe.period
+            string symbolLine = syminfo.ticker + " | " + displayedTimeframe
+            string dateLine = str.tostring(dayofmonth(time_close)) + "/" + str.tostring(month(time_close)) + "/" + str.tostring(year(time_close))
+            table.cell(panels.marketInfo, 0, 0, dateLine, width = cellWidth, height = cellHeight, text_color = c_symInfo, text_halign = bandz_watermark_alignment(a_symInfo), text_size = bandz_watermark_size(s_symInfo), bgcolor = c_bg)
+            table.cell(panels.marketInfo, 0, 1, symbolLine, width = cellWidth, height = cellHeight, text_color = c_symInfo, text_halign = bandz_watermark_alignment(a_symInfo), text_size = bandz_watermark_size(s_symInfo), bgcolor = c_bg)
+
+if barstate.islast
+    bandz_render_watermark(bandzWatermark)
+
+// ============================================================================
+// ========================== REFERENCE LEVELS ===============================
+// ============================================================================
+// Original Bandz implementation of the author's D/W/M/Y references,
+// percentage levels, alerts, and label behavior.
+// This implementation does not import or reuse third-party Pine source.
+
+bandz_levels_line_style(string selection) =>
+    switch selection
+        "Dotted" => line.style_dotted
+        "Dashed" => line.style_dashed
+        => line.style_solid
+
+bandz_levels_text_size(string selection) =>
+    switch selection
+        "Huge"   => size.huge
+        "Large"  => size.large
+        "Normal" => size.normal
+        "Small"  => size.small
+        "Auto"   => size.auto
+        => size.tiny
+// ---------------------------------------- Inputs --------------------------------------------------
+var g_SETTINGS      = "Settings"
+max_days            = input.int(1, "Reference Drawing Limit", 1, tooltip = "Only this many drawings will be kept for each selected D/W/M/Y and automatic-level type unless Unlimited History is enabled.", group = g_SETTINGS)
+tf_limit            = input.timeframe("60", "D/Y + Daily EQ Timeframe Limit", tooltip = "Daily references, Year Open, and Daily EQ will not appear above this chart timeframe. Weekly and monthly opens/highs/lows now use the same independent timeframe gates as their 25%/50%/75% levels.", group = g_SETTINGS)
+lbl_size            = bandz_levels_text_size(input.string('Tiny', "Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], tooltip = "The size of all labels", group = g_SETTINGS))
+txt_color           = input.color(color.black, "Text Color", tooltip = "The color of reference-level label text", group = g_SETTINGS)
+label_price         = input.bool(false, "Display Price in Labels", tooltip = "Append the level price to D/W/M/Y and automatic-level labels.", group = g_SETTINGS)
+// Extended references keep the original push-right behavior. Compact references
+// use their own marker offset/length below, completely separate from ADR.
+right_buffer        = input.int(10, "Extended Right Buffer (Bars)", minval = 0, maxval = 500, tooltip = "How many bars to the right extended D/W/M/Y reference lines and labels are pushed.", group = g_SETTINGS)
+var g_LABEL_COMBINE = "Label Combining"
+combine_labels      = input.bool(true, "Combine Close Labels", tooltip = "Combines D/W/M/Y opens, highs/lows, and automatic levels when they are close together to reduce clutter.", group = g_LABEL_COMBINE)
+combine_threshold   = input.float(0.02, "Combine Threshold %", 0.01, 1.0, 0.01, tooltip = "Labels within this percentage of price will be combined", group = g_LABEL_COMBINE)
+
+
+var g_DWM           = "Day - Week - Month - Year"
+sep_unlimited       = input.bool(false, "Unlimited History", tooltip = "Show as many selected D/W/M/Y reference sets as possible. Otherwise, the Reference Drawing Limit is used.", group = g_DWM)
+alert_HL            = input.bool(false, "Alert High/Low Break", tooltip = "Alert when any selected highs and lows are traded through. The desired timeframe's high/low option must be enabled at the time that an alert is created", group = g_DWM)
+
+show_d_open         = input.bool(false, "D Open", inline = "DO", group = g_DWM)
+dhl                 = input.bool(true, "High/Low", inline = "DO", group = g_DWM)
+d_color             = input.color(color.black, "", inline = "DO", group = g_DWM)
+show_w_open         = input.bool(false, "W Open", inline = "WO", group = g_DWM)
+whl                 = input.bool(true, "High/Low", inline = "WO", group = g_DWM)
+w_color             = input.color(color.black, "", inline = "WO", group = g_DWM)
+show_m_open         = input.bool(true, "M Open", inline = "MO", group = g_DWM)
+mhl                 = input.bool(true, "High/Low", inline = "MO", group = g_DWM)
+m_color             = input.color(color.black, "", inline = "MO", group = g_DWM)
+show_y_open         = input.bool(true, "Y Open", inline = "YO", group = g_DWM)
+y_color             = input.color(color.black, "", inline = "YO", group = g_DWM)
+htf_style           = bandz_levels_line_style(input.string(defval = 'Solid', title = "Style", options = ['Solid', 'Dotted', 'Dashed'], inline = "D0", group = g_DWM))
+htf_width           = input.int(2, "", inline = "D0", group = g_DWM)
+
+// Per-level display mode. Checked = original extended line. Unchecked = compact
+// right-side marker. These settings intentionally do not affect NWOG/NDOG or ADR.
+var g_REF_EXTEND = "Reference Extend / Compact"
+referenceMarkerOffsetBars = input.int(5, "Reference Marker Offset (Bars)", minval = 1, maxval = 100, group = g_REF_EXTEND, tooltip = "Compact D/W/M/Y reference markers only. Separate from the ADR marker offset.")
+referenceMarkerLengthBars = input.int(5, "Reference Marker Length (Bars)", minval = 1, maxval = 20, group = g_REF_EXTEND, tooltip = "Compact D/W/M/Y reference markers only. Separate from the ADR marker length.")
+
+d_open_extend = input.bool(false, "D Open", inline = "DEX1", group = g_REF_EXTEND)
+pdh_extend    = input.bool(true, "PDH", inline = "DEX1", group = g_REF_EXTEND)
+pdl_extend    = input.bool(true, "PDL", inline = "DEX1", group = g_REF_EXTEND)
+d_eq_extend   = input.bool(true, "D.EQ", inline = "DEX1", group = g_REF_EXTEND)
+
+w_open_extend = input.bool(false, "W Open", inline = "WEX1", group = g_REF_EXTEND)
+pwh_extend    = input.bool(false, "PWH", inline = "WEX1", group = g_REF_EXTEND)
+pwl_extend    = input.bool(false, "PWL", inline = "WEX1", group = g_REF_EXTEND)
+w_25_extend   = input.bool(false, "W.25", inline = "WEX2", group = g_REF_EXTEND)
+w_eq_extend   = input.bool(false, "W.EQ", inline = "WEX2", group = g_REF_EXTEND)
+w_75_extend   = input.bool(false, "W.75", inline = "WEX2", group = g_REF_EXTEND)
+
+m_open_extend = input.bool(false, "M Open", inline = "MEX1", group = g_REF_EXTEND)
+pmh_extend    = input.bool(false, "PMH", inline = "MEX1", group = g_REF_EXTEND)
+pml_extend    = input.bool(false, "PML", inline = "MEX1", group = g_REF_EXTEND)
+m_25_extend   = input.bool(false, "M.25", inline = "MEX2", group = g_REF_EXTEND)
+m_eq_extend   = input.bool(false, "M.EQ", inline = "MEX2", group = g_REF_EXTEND)
+m_75_extend   = input.bool(false, "M.75", inline = "MEX2", group = g_REF_EXTEND)
+
+y_open_extend = input.bool(false, "Y Open", group = g_REF_EXTEND)
+
+var g_EQ            = "Automatic Weekly / Monthly Levels"
+auto_htf_levels     = input.bool(true, "Enable Automatic Levels", tooltip = "Draw stable previous-week and previous-month 25%, 50%, and 75% levels. Weekly and monthly chart visibility are controlled separately below.", group = g_EQ)
+show_level_labels   = input.bool(true, "Show Level Labels", group = g_EQ)
+
+weekly_min_tf       = input.timeframe("15", "Weekly Min TF", inline = "WTF", group = g_EQ)
+weekly_max_tf       = input.timeframe("60", "Weekly Max TF", inline = "WTF", group = g_EQ)
+monthly_min_tf      = input.timeframe("60", "Monthly Min TF", inline = "MTF", group = g_EQ)
+monthly_max_tf      = input.timeframe("1W", "Monthly Max TF", inline = "MTF", group = g_EQ)
+
+show_d_eq           = input.bool(true, "Optional Daily EQ", inline = "DEQ", tooltip = "Optional stable previous-day 50% level. It is available from the 1-minute chart through the general D/W/M/Y Timeframe Limit.", group = g_EQ)
+d_eq_color          = input.color(color.black, "", inline = "DEQ", group = g_EQ)
+d_eq_label_txt      = input.string("D.EQ", "Label", inline = "DEQ", group = g_EQ)
+
+show_w_25           = input.bool(true, "Weekly 25%", inline = "W25", group = g_EQ)
+w_25_color          = input.color(color.rgb(41, 98, 255), "", inline = "W25", group = g_EQ)
+w_25_label_txt      = input.string("W.25", "Label", inline = "W25", group = g_EQ)
+
+show_w_eq           = input.bool(true, "Weekly EQ / 50%", inline = "WEQ", group = g_EQ)
+w_eq_color          = input.color(color.rgb(242, 54, 69), "", inline = "WEQ", group = g_EQ)
+w_eq_label_txt      = input.string("W.EQ", "Label", inline = "WEQ", group = g_EQ)
+
+show_w_75           = input.bool(true, "Weekly 75%", inline = "W75", group = g_EQ)
+w_75_color          = input.color(color.rgb(41, 98, 255), "", inline = "W75", group = g_EQ)
+w_75_label_txt      = input.string("W.75", "Label", inline = "W75", group = g_EQ)
+
+show_m_25           = input.bool(true, "Monthly 25%", inline = "M25", group = g_EQ)
+m_25_color          = input.color(color.rgb(41, 98, 255), "", inline = "M25", group = g_EQ)
+m_25_label_txt      = input.string("M.25", "Label", inline = "M25", group = g_EQ)
+
+show_m_eq           = input.bool(true, "Monthly EQ / 50%", inline = "MEQ", group = g_EQ)
+m_eq_color          = input.color(color.rgb(242, 54, 69), "", inline = "MEQ", group = g_EQ)
+m_eq_label_txt      = input.string("M.EQ", "Label", inline = "MEQ", group = g_EQ)
+
+show_m_75           = input.bool(true, "Monthly 75%", inline = "M75", group = g_EQ)
+m_75_color          = input.color(color.rgb(41, 98, 255), "", inline = "M75", group = g_EQ)
+m_75_label_txt      = input.string("M.75", "Label", inline = "M75", group = g_EQ)
+
+eq_style            = bandz_levels_line_style(input.string(defval = 'Solid', title = "Level Line Style", options = ['Solid', 'Dotted', 'Dashed'], inline = "EQ0", group = g_EQ))
+eq_width            = input.int(1, "", inline = "EQ0", group = g_EQ)
+
+
+
+// ============================================================================
+// ============================== ADR INPUTS ==================================
+// ============================================================================
+adrGroup = "ADR Levels"
+
+showAdr = input.bool(
+     true,
+     "Show ADR levels",
+     group = adrGroup
+)
+
+adrLength = input.int(
+     10,
+     "ADR calculation length",
+     minval = 2,
+     maxval = 100,
+     group = adrGroup
+)
+
+adrHistory = input.int(
+     1,
+     "Daily ADR sets shown",
+     minval = 1,
+     maxval = 30,
+     group = adrGroup
+)
+
+adrColor = input.color(
+     color.new(color.rgb(46, 46, 46), 0),
+     "ADR marker and label color",
+     group = adrGroup
+)
+
+adrMarkerOffsetBars = input.int(
+     20,
+     "ADR marker offset (bars)",
+     minval = 1,
+     maxval = 100,
+     group = adrGroup
+)
+
+adrMarkerLengthBars = input.int(
+     2,
+     "ADR marker length (bars)",
+     minval = 1,
+     maxval = 20,
+     group = adrGroup
+)
+
+adrMarkerWidth = input.int(
+     1,
+     "ADR marker width",
+     minval = 1,
+     maxval = 4,
+     group = adrGroup
+)
+
+// Custom chart-timeframe gates.
+chart_tf_seconds = timeframe.in_seconds(timeframe.period)
+
+tf_is_between(string min_tf, string max_tf) =>
+    float min_seconds = timeframe.in_seconds(min_tf)
+    float max_seconds = timeframe.in_seconds(max_tf)
+    float lower_bound = math.min(min_seconds, max_seconds)
+    float upper_bound = math.max(min_seconds, max_seconds)
+    timeframe.isintraday and chart_tf_seconds >= lower_bound and chart_tf_seconds <= upper_bound
+
+is_weekly_levels_tf  = tf_is_between(weekly_min_tf, weekly_max_tf)
+is_monthly_levels_tf = tf_is_between(monthly_min_tf, monthly_max_tf)
+
+
+
+// ---------------------------------------- Record-owned drawing state --------------------------------------------
+type BandzLevelMark
+    line levelLine
+    label levelLabel
+    float price
+    string baseText
+    int startBar
+
+type BandzPeriodPair
+    line highLine
+    line lowLine
+    label highLabel
+    label lowLabel
+    float highPrice
+    float lowPrice
+    int startBar
+    bool highAlerted
+    bool lowAlerted
+
+type BandzPeriodBook
+    BandzLevelMark[] opens
+    BandzPeriodPair[] ranges
+
+type BandzRatioBook
+    BandzLevelMark[] levels
+
+
+// BEST MIX: store a stable base_price so merges/restores don't drift
+type label_info
+    label lbl
+    string base_text
+    float base_price
+    int created
+    bool active
+
+var label_info[] master_labels = array.new<label_info>()
+
+var BandzPeriodBook dailyBook = BandzPeriodBook.new(array.new<BandzLevelMark>(), array.new<BandzPeriodPair>())
+var BandzPeriodBook weeklyBook = BandzPeriodBook.new(array.new<BandzLevelMark>(), array.new<BandzPeriodPair>())
+var BandzPeriodBook monthlyBook = BandzPeriodBook.new(array.new<BandzLevelMark>(), array.new<BandzPeriodPair>())
+var BandzPeriodBook yearlyBook = BandzPeriodBook.new(array.new<BandzLevelMark>(), array.new<BandzPeriodPair>())
+
+var BandzRatioBook dailyEqBook = BandzRatioBook.new(array.new<BandzLevelMark>())
+var BandzRatioBook weekly25Book = BandzRatioBook.new(array.new<BandzLevelMark>())
+var BandzRatioBook weeklyEqBook = BandzRatioBook.new(array.new<BandzLevelMark>())
+var BandzRatioBook weekly75Book = BandzRatioBook.new(array.new<BandzLevelMark>())
+var BandzRatioBook monthly25Book = BandzRatioBook.new(array.new<BandzLevelMark>())
+var BandzRatioBook monthlyEqBook = BandzRatioBook.new(array.new<BandzLevelMark>())
+var BandzRatioBook monthly75Book = BandzRatioBook.new(array.new<BandzLevelMark>())
+
+
+// Confirmed previous-period values. Using prior HTF bars keeps these levels
+// identical when switching between chart timeframes.
+current_d_open = request.security(syminfo.tickerid, "D", open, barmerge.gaps_off, barmerge.lookahead_on)
+prev_d_high = request.security(syminfo.tickerid, "D", high[1], barmerge.gaps_off, barmerge.lookahead_on)
+prev_d_low = request.security(syminfo.tickerid, "D", low[1], barmerge.gaps_off, barmerge.lookahead_on)
+current_w_open = request.security(syminfo.tickerid, "W", open, barmerge.gaps_off, barmerge.lookahead_on)
+prev_w_high = request.security(syminfo.tickerid, "W", high[1], barmerge.gaps_off, barmerge.lookahead_on)
+prev_w_low = request.security(syminfo.tickerid, "W", low[1], barmerge.gaps_off, barmerge.lookahead_on)
+current_m_open = request.security(syminfo.tickerid, "M", open, barmerge.gaps_off, barmerge.lookahead_on)
+prev_m_high = request.security(syminfo.tickerid, "M", high[1], barmerge.gaps_off, barmerge.lookahead_on)
+prev_m_low = request.security(syminfo.tickerid, "M", low[1], barmerge.gaps_off, barmerge.lookahead_on)
+current_y_open = request.security(syminfo.tickerid, "12M", open, barmerge.gaps_off, barmerge.lookahead_on)
+
+var color bandz_levels_transparent = #ffffff00
+
+bool bandz_day_changed = timeframe.change("D")
+bool bandz_week_changed = timeframe.change("W")
+bool bandz_month_changed = timeframe.change("M")
+bool bandz_year_changed = timeframe.change("12M")
+// ---------------------------------------- Variables & Constants --------------------------------------------------
+prices_are_close(float p1, float p2) =>
+    if na(p1) or na(p2)
+        false
+    else
+        // Use absolute prices so the comparison also behaves correctly on
+        // instruments whose values can approach or cross zero. The tiny
+        // mintick epsilon prevents exact-threshold pairs from being split by
+        // floating-point rounding.
+        float ref = math.max(math.max(math.abs(p1), math.abs(p2)), syminfo.mintick)
+        float threshold = ref * (combine_threshold / 100.0)
+        float epsilon = syminfo.mintick * 0.001
+        math.abs(p1 - p2) <= threshold + epsilon
+
+register_label(float price, string base_txt, label lbl, bool merge_ok) =>
+    if merge_ok and not na(lbl) and not na(price)
+        // A drawing should only have one registry entry. Besides preventing
+        // duplicate text, updating an existing entry makes this safe to call
+        // again when a label is refreshed or reactivated.
+        bool already_registered = false
+        if array.size(master_labels) > 0
+            for i = 0 to array.size(master_labels) - 1
+                li = array.get(master_labels, i)
+                if li.lbl == lbl
+                    li.base_text  := base_txt
+                    li.base_price := price
+                    li.active     := true
+                    array.set(master_labels, i, li)
+                    already_registered := true
+                    break
+
+        if not already_registered
+            array.push(master_labels, label_info.new(lbl, base_txt, price, time, true))
+
+unregister_label(label lbl) =>
+    if not na(lbl) and array.size(master_labels) > 0
+        for i = 0 to array.size(master_labels) - 1
+            li = array.get(master_labels, i)
+            if li.active and li.lbl == lbl
+                li.active := false
+                array.set(master_labels, i, li)
+                break
+
+// Restore from base_price so merges never "drift"
+restore_all_label_texts() =>
+    if array.size(master_labels) > 0
+        for i = 0 to array.size(master_labels) - 1
+            li = array.get(master_labels, i)
+            if li.active and not na(li.lbl)
+                p = li.base_price
+                if na(p)
+                    p := label.get_y(li.lbl)
+                if not na(p)
+                    label.set_y(li.lbl, p)
+                txt = label_price and not na(p) ? str.format("{0} ({1})", li.base_text, p) : li.base_text
+                label.set_text(li.lbl, txt)
+
+// Combine close labels, but keep the merged label:
+// - on the RIGHTMOST label (so it stays in the right column)
+// - at a REAL level price (primary label's base_price), not an average
+combine_persistent_labels() =>
+    if not combine_labels
+        restore_all_label_texts()
+        0
+    else
+        restore_all_label_texts()
+
+        tmp_lbls    = array.new<label>()
+        tmp_text    = array.new_string()
+        tmp_created = array.new_int()
+        tmp_price   = array.new_float()
+        tmp_x       = array.new_int()
+
+        // Pine's for-loop can count downward when its end is below its start,
+        // so explicitly guard the empty array instead of iterating 0 to -1.
+        if array.size(master_labels) > 0
+            for ii = 0 to array.size(master_labels) - 1
+                li = array.get(master_labels, ii)
+                if li.active and not na(li.lbl) and not na(li.base_price)
+                    x = label.get_x(li.lbl)
+                    if not na(x)
+                        array.push(tmp_lbls,    li.lbl)
+                        array.push(tmp_text,    li.base_text)
+                        array.push(tmp_created, li.created)
+                        array.push(tmp_price,   li.base_price)
+                        array.push(tmp_x,       x)
+
+        m = array.size(tmp_lbls)
+        if m > 1
+            // insertion sort by price (keep arrays aligned)
+            for ii = 1 to m - 1
+                key_p = array.get(tmp_price,   ii)
+                key_l = array.get(tmp_lbls,    ii)
+                key_t = array.get(tmp_text,    ii)
+                key_c = array.get(tmp_created, ii)
+                key_x = array.get(tmp_x,       ii)
+
+                jj = ii - 1
+                while jj >= 0
+                    if array.get(tmp_price, jj) > key_p
+                        array.set(tmp_price,   jj + 1, array.get(tmp_price,   jj))
+                        array.set(tmp_lbls,    jj + 1, array.get(tmp_lbls,    jj))
+                        array.set(tmp_text,    jj + 1, array.get(tmp_text,    jj))
+                        array.set(tmp_created, jj + 1, array.get(tmp_created, jj))
+                        array.set(tmp_x,       jj + 1, array.get(tmp_x,       jj))
+                        jj -= 1
+                    else
+                        break
+
+                array.set(tmp_price,   jj + 1, key_p)
+                array.set(tmp_lbls,    jj + 1, key_l)
+                array.set(tmp_text,    jj + 1, key_t)
+                array.set(tmp_created, jj + 1, key_c)
+                array.set(tmp_x,       jj + 1, key_x)
+
+            i = 0
+            while i < m
+                previous_price = array.get(tmp_price, i)
+                count          = 1
+                combined       = array.get(tmp_text,  i)
+
+                primary_idx     = i
+                primary_created = array.get(tmp_created, i)
+                primary_x       = array.get(tmp_x, i)
+
+                members = array.new_int()
+                array.push(members, i)
+
+                j = i + 1
+                while j < m
+                    pj = array.get(tmp_price, j)
+                    // Prices are sorted, so checking each adjacent pair forms
+                    // one stable cluster. The former moving-average check could
+                    // incorrectly reject the last label in a close stack.
+                    if not prices_are_close(previous_price, pj)
+                        break
+
+                    combined := combined + " / " + array.get(tmp_text, j)
+                    count    += 1
+                    previous_price := pj
+
+                    xj = array.get(tmp_x, j)
+                    cj = array.get(tmp_created, j)
+
+                    // PRIMARY: rightmost label (keeps merged text in the right column)
+                    // tie-break: older created
+                    if (not na(xj) and (na(primary_x) or xj > primary_x)) or ((not na(xj) and not na(primary_x) and xj == primary_x) and cj < primary_created)
+                        primary_x       := xj
+                        primary_idx     := j
+                        primary_created := cj
+                    else if na(primary_x) and cj < primary_created
+                        primary_created := cj
+                        primary_idx     := j
+
+                    array.push(members, j)
+                    j += 1
+
+                if count > 1
+                    for k = 0 to array.size(members) - 1
+                        idxm = array.get(members, k)
+                        L    = array.get(tmp_lbls, idxm)
+
+                        if idxm == primary_idx
+                            primary_price = array.get(tmp_price, primary_idx)
+                            new_text = label_price ? str.format("{0} ({1})", combined, primary_price) : combined
+                            label.set_text(L, new_text)
+                            if not na(primary_price)
+                                label.set_y(L, primary_price)
+                        else
+                            label.set_text(L, "")
+
+                i := j
+
+        0
+
+bandz_level_label_text(string baseText, float price) =>
+    label_price ? str.format("{0} ({1})", baseText, price) : baseText
+
+bandz_delete_level_mark(BandzLevelMark mark) =>
+    if not na(mark.levelLine)
+        line.delete(mark.levelLine)
+    if not na(mark.levelLabel)
+        unregister_label(mark.levelLabel)
+        label.delete(mark.levelLabel)
+
+bandz_trim_level_marks(BandzLevelMark[] marks, bool unlimited) =>
+    if not unlimited
+        while marks.size() > max_days
+            BandzLevelMark expired = marks.pop()
+            bandz_delete_level_mark(expired)
+
+bandz_delete_period_pair(BandzPeriodPair pair) =>
+    if not na(pair.highLine)
+        line.delete(pair.highLine)
+    if not na(pair.lowLine)
+        line.delete(pair.lowLine)
+    if not na(pair.highLabel)
+        unregister_label(pair.highLabel)
+        label.delete(pair.highLabel)
+    if not na(pair.lowLabel)
+        unregister_label(pair.lowLabel)
+        label.delete(pair.lowLabel)
+
+bandz_trim_period_pairs(BandzPeriodPair[] pairs) =>
+    if not sep_unlimited
+        while pairs.size() > max_days
+            BandzPeriodPair expired = pairs.pop()
+            bandz_delete_period_pair(expired)
+
+
+// ---------------------------------------- Functions --------------------------------------------------
+bandz_reference_left(bool extendLine, int startBar) =>
+    extendLine ? startBar : bar_index + referenceMarkerOffsetBars
+
+bandz_reference_right(bool extendLine, int compactLeft) =>
+    extendLine ? bar_index + right_buffer : compactLeft + referenceMarkerLengthBars
+
+bandz_reference_label_x(bool extendLine, int compactRight) =>
+    extendLine ? bar_index + right_buffer : compactRight + 1
+
+bandz_sync_period_open(BandzPeriodBook book, bool enabled, bool periodChanged, float openPrice, string labelText, color levelColor, bool extendLine) =>
+    if enabled
+        // The latest level either stretches from its true period start or floats
+        // as a compact marker beside the chart. Old periods freeze automatically
+        // when the replacement period is created.
+        bool createNow = (periodChanged or book.opens.size() == 0) and not na(openPrice)
+
+        if createNow
+            int startBar = bar_index
+            int leftX = bandz_reference_left(extendLine, startBar)
+            int rightX = bandz_reference_right(extendLine, leftX)
+            int labelX = bandz_reference_label_x(extendLine, rightX)
+            line newLine = line.new(leftX, openPrice, rightX, openPrice, xloc = xloc.bar_index, extend = extend.none, style = htf_style, width = htf_width, color = levelColor)
+            label newLabel = label.new(labelX, openPrice, bandz_level_label_text(labelText, openPrice), xloc = xloc.bar_index, style = label.style_label_left, color = bandz_levels_transparent, textcolor = txt_color, size = lbl_size)
+            BandzLevelMark mark = BandzLevelMark.new(newLine, newLabel, openPrice, labelText, startBar)
+            book.opens.unshift(mark)
+            register_label(openPrice, labelText, newLabel, true)
+            bandz_trim_level_marks(book.opens, sep_unlimited)
+        else if book.opens.size() > 0
+            BandzLevelMark latest = book.opens.get(0)
+            int leftX = bandz_reference_left(extendLine, latest.startBar)
+            int rightX = bandz_reference_right(extendLine, leftX)
+            int labelX = bandz_reference_label_x(extendLine, rightX)
+            line.set_xy1(latest.levelLine, leftX, latest.price)
+            line.set_xy2(latest.levelLine, rightX, latest.price)
+            line.set_color(latest.levelLine, levelColor)
+            line.set_style(latest.levelLine, htf_style)
+            line.set_width(latest.levelLine, htf_width)
+            label.set_x(latest.levelLabel, labelX)
+            label.set_y(latest.levelLabel, latest.price)
+            label.set_text(latest.levelLabel, bandz_level_label_text(latest.baseText, latest.price))
+            label.set_textcolor(latest.levelLabel, txt_color)
+            label.set_size(latest.levelLabel, lbl_size)
+
+bandz_sync_period_range(BandzPeriodBook book, bool enabled, bool periodChanged, float previousHigh, float previousLow, string timeframeText, color levelColor, bool extendHigh, bool extendLow) =>
+    if enabled
+        bool createNow = (periodChanged or book.ranges.size() == 0) and not na(previousHigh) and not na(previousLow)
+
+        if createNow
+            string highText = "P" + timeframeText + "H"
+            string lowText = "P" + timeframeText + "L"
+            int startBar = bar_index
+
+            int highLeftX = bandz_reference_left(extendHigh, startBar)
+            int highRightX = bandz_reference_right(extendHigh, highLeftX)
+            int highLabelX = bandz_reference_label_x(extendHigh, highRightX)
+
+            int lowLeftX = bandz_reference_left(extendLow, startBar)
+            int lowRightX = bandz_reference_right(extendLow, lowLeftX)
+            int lowLabelX = bandz_reference_label_x(extendLow, lowRightX)
+
+            line highLine = line.new(highLeftX, previousHigh, highRightX, previousHigh, xloc = xloc.bar_index, extend = extend.none, style = htf_style, width = htf_width, color = levelColor)
+            line lowLine = line.new(lowLeftX, previousLow, lowRightX, previousLow, xloc = xloc.bar_index, extend = extend.none, style = htf_style, width = htf_width, color = levelColor)
+            label highLabel = label.new(highLabelX, previousHigh, bandz_level_label_text(highText, previousHigh), xloc = xloc.bar_index, style = label.style_label_left, color = bandz_levels_transparent, textcolor = txt_color, size = lbl_size)
+            label lowLabel = label.new(lowLabelX, previousLow, bandz_level_label_text(lowText, previousLow), xloc = xloc.bar_index, style = label.style_label_left, color = bandz_levels_transparent, textcolor = txt_color, size = lbl_size)
+            BandzPeriodPair pair = BandzPeriodPair.new(highLine, lowLine, highLabel, lowLabel, previousHigh, previousLow, startBar, false, false)
+            book.ranges.unshift(pair)
+            register_label(previousHigh, highText, highLabel, true)
+            register_label(previousLow, lowText, lowLabel, true)
+            bandz_trim_period_pairs(book.ranges)
+        else if book.ranges.size() > 0
+            BandzPeriodPair latest = book.ranges.get(0)
+
+            int highLeftX = bandz_reference_left(extendHigh, latest.startBar)
+            int highRightX = bandz_reference_right(extendHigh, highLeftX)
+            int highLabelX = bandz_reference_label_x(extendHigh, highRightX)
+
+            int lowLeftX = bandz_reference_left(extendLow, latest.startBar)
+            int lowRightX = bandz_reference_right(extendLow, lowLeftX)
+            int lowLabelX = bandz_reference_label_x(extendLow, lowRightX)
+
+            line.set_xy1(latest.highLine, highLeftX, latest.highPrice)
+            line.set_xy2(latest.highLine, highRightX, latest.highPrice)
+            line.set_xy1(latest.lowLine, lowLeftX, latest.lowPrice)
+            line.set_xy2(latest.lowLine, lowRightX, latest.lowPrice)
+            line.set_color(latest.highLine, levelColor)
+            line.set_color(latest.lowLine, levelColor)
+            line.set_style(latest.highLine, htf_style)
+            line.set_style(latest.lowLine, htf_style)
+            line.set_width(latest.highLine, htf_width)
+            line.set_width(latest.lowLine, htf_width)
+            label.set_x(latest.highLabel, highLabelX)
+            label.set_x(latest.lowLabel, lowLabelX)
+            label.set_y(latest.highLabel, latest.highPrice)
+            label.set_y(latest.lowLabel, latest.lowPrice)
+            label.set_text(latest.highLabel, bandz_level_label_text("P" + timeframeText + "H", latest.highPrice))
+            label.set_text(latest.lowLabel, bandz_level_label_text("P" + timeframeText + "L", latest.lowPrice))
+            label.set_textcolor(latest.highLabel, txt_color)
+            label.set_textcolor(latest.lowLabel, txt_color)
+            label.set_size(latest.highLabel, lbl_size)
+            label.set_size(latest.lowLabel, lbl_size)
+
+        if alert_HL and book.ranges.size() > 0
+            BandzPeriodPair currentPair = book.ranges.get(0)
+            if not currentPair.highAlerted and high > currentPair.highPrice
+                currentPair.highAlerted := true
+                alert("Hit P" + timeframeText + "H", alert.freq_once_per_bar)
+            if not currentPair.lowAlerted and low < currentPair.lowPrice
+                currentPair.lowAlerted := true
+                alert("Hit P" + timeframeText + "L", alert.freq_once_per_bar)
+            book.ranges.set(0, currentPair)
+
+bandz_sync_ratio_level(BandzRatioBook book, bool enabled, bool periodChanged, float previousHigh, float previousLow, float ratio, color levelColor, string levelText, bool extendLine) =>
+    if enabled
+        float levelPrice = previousLow + (previousHigh - previousLow) * ratio
+        bool createNow = (periodChanged or book.levels.size() == 0) and not na(levelPrice)
+
+        if createNow
+            int startBar = bar_index
+            int leftX = bandz_reference_left(extendLine, startBar)
+            int rightX = bandz_reference_right(extendLine, leftX)
+            int labelX = bandz_reference_label_x(extendLine, rightX)
+            line newLine = line.new(leftX, levelPrice, rightX, levelPrice, xloc = xloc.bar_index, extend = extend.none, style = eq_style, width = eq_width, color = levelColor)
+            label newLabel = na
+            if show_level_labels
+                newLabel := label.new(labelX, levelPrice, bandz_level_label_text(levelText, levelPrice), xloc = xloc.bar_index, style = label.style_label_left, color = bandz_levels_transparent, textcolor = txt_color, size = lbl_size)
+                register_label(levelPrice, levelText, newLabel, true)
+            BandzLevelMark mark = BandzLevelMark.new(newLine, newLabel, levelPrice, levelText, startBar)
+            book.levels.unshift(mark)
+            bandz_trim_level_marks(book.levels, sep_unlimited)
+        else if book.levels.size() > 0
+            BandzLevelMark latest = book.levels.get(0)
+            int leftX = bandz_reference_left(extendLine, latest.startBar)
+            int rightX = bandz_reference_right(extendLine, leftX)
+            int labelX = bandz_reference_label_x(extendLine, rightX)
+            line.set_xy1(latest.levelLine, leftX, latest.price)
+            line.set_xy2(latest.levelLine, rightX, latest.price)
+            line.set_color(latest.levelLine, levelColor)
+            line.set_style(latest.levelLine, eq_style)
+            line.set_width(latest.levelLine, eq_width)
+            if not na(latest.levelLabel)
+                label.set_x(latest.levelLabel, labelX)
+                label.set_y(latest.levelLabel, latest.price)
+                label.set_text(latest.levelLabel, bandz_level_label_text(latest.baseText, latest.price))
+                label.set_textcolor(latest.levelLabel, txt_color)
+                label.set_size(latest.levelLabel, lbl_size)
+
+bandz_render_reference_levels() =>
+    bool generalTimeframeAllowed = timeframe.in_seconds("") <= timeframe.in_seconds(tf_limit)
+
+    // Daily/yearly references keep the general gate.
+    bandz_sync_period_open(dailyBook, generalTimeframeAllowed and show_d_open, bandz_day_changed, current_d_open, "D OPEN", d_color, d_open_extend)
+    bandz_sync_period_open(yearlyBook, generalTimeframeAllowed and show_y_open, bandz_year_changed, current_y_open, "Y OPEN", y_color, y_open_extend)
+    bandz_sync_period_range(dailyBook, generalTimeframeAllowed and dhl, bandz_day_changed, prev_d_high, prev_d_low, "D", d_color, pdh_extend, pdl_extend)
+
+    // Weekly/monthly opens and highs/lows use the same timeframe windows as
+    // their 25/50/75 levels, but each drawing has its own extend/compact toggle.
+    bandz_sync_period_open(weeklyBook, is_weekly_levels_tf and show_w_open, bandz_week_changed, current_w_open, "W OPEN", w_color, w_open_extend)
+    bandz_sync_period_range(weeklyBook, is_weekly_levels_tf and whl, bandz_week_changed, prev_w_high, prev_w_low, "W", w_color, pwh_extend, pwl_extend)
+
+    bandz_sync_period_open(monthlyBook, is_monthly_levels_tf and show_m_open, bandz_month_changed, current_m_open, "M OPEN", m_color, m_open_extend)
+    bandz_sync_period_range(monthlyBook, is_monthly_levels_tf and mhl, bandz_month_changed, prev_m_high, prev_m_low, "M", m_color, pmh_extend, pml_extend)
+
+    bandz_sync_ratio_level(dailyEqBook, generalTimeframeAllowed and show_d_eq, bandz_day_changed, prev_d_high, prev_d_low, 0.50, d_eq_color, d_eq_label_txt, d_eq_extend)
+    bandz_sync_ratio_level(weekly25Book, auto_htf_levels and is_weekly_levels_tf and show_w_25, bandz_week_changed, prev_w_high, prev_w_low, 0.25, w_25_color, w_25_label_txt, w_25_extend)
+    bandz_sync_ratio_level(weeklyEqBook, auto_htf_levels and is_weekly_levels_tf and show_w_eq, bandz_week_changed, prev_w_high, prev_w_low, 0.50, w_eq_color, w_eq_label_txt, w_eq_extend)
+    bandz_sync_ratio_level(weekly75Book, auto_htf_levels and is_weekly_levels_tf and show_w_75, bandz_week_changed, prev_w_high, prev_w_low, 0.75, w_75_color, w_75_label_txt, w_75_extend)
+    bandz_sync_ratio_level(monthly25Book, auto_htf_levels and is_monthly_levels_tf and show_m_25, bandz_month_changed, prev_m_high, prev_m_low, 0.25, m_25_color, m_25_label_txt, m_25_extend)
+    bandz_sync_ratio_level(monthlyEqBook, auto_htf_levels and is_monthly_levels_tf and show_m_eq, bandz_month_changed, prev_m_high, prev_m_low, 0.50, m_eq_color, m_eq_label_txt, m_eq_extend)
+    bandz_sync_ratio_level(monthly75Book, auto_htf_levels and is_monthly_levels_tf and show_m_75, bandz_month_changed, prev_m_high, prev_m_low, 0.75, m_75_color, m_75_label_txt, m_75_extend)
+
+bandz_render_reference_levels()
+
+// ============================================================================
+// ============================ ADR CALCULATION ===============================
+// ============================================================================
+// Current-day time/open metadata is fixed as soon as the daily bar begins.
+// ADR is shifted by one full daily bar, so lookahead_on exposes only confirmed
+// information and lets intraday markers exist from day one.
+[dailyStart, dailyEnd, dailyOpen, dailyAdr] = request.security(
+     syminfo.tickerid,
+     "D",
+     [time, time_close, open, ta.sma(high - low, adrLength)[1]],
+     gaps = barmerge.gaps_off,
+     lookahead = barmerge.lookahead_on
+)
+
+newDailyPeriod = not na(dailyStart) and (
+     na(dailyStart[1]) or
+     dailyStart != dailyStart[1]
+)
+
+adrTimeframeSupported = timeframe.in_seconds() <=
+     timeframe.in_seconds("D")
+
+var array<line> adrLines = array.new_line()
+var array<label> adrLabels = array.new_label()
+
+var line currentUpperThirdLine = na
+var line currentLowerThirdLine = na
+var line currentUpperFullLine = na
+var line currentLowerFullLine = na
+
+var label currentUpperThirdLabel = na
+var label currentLowerThirdLabel = na
+var label currentUpperFullLabel = na
+var label currentLowerFullLabel = na
+
+upperThirdLevel = not na(dailyOpen) and not na(dailyAdr) ?
+     dailyOpen + dailyAdr / 3.0 :
+     na
+
+lowerThirdLevel = not na(dailyOpen) and not na(dailyAdr) ?
+     dailyOpen - dailyAdr / 3.0 :
+     na
+
+upperFullLevel = not na(dailyOpen) and not na(dailyAdr) ?
+     dailyOpen + dailyAdr :
+     na
+
+lowerFullLevel = not na(dailyOpen) and not na(dailyAdr) ?
+     dailyOpen - dailyAdr :
+     na
+
+adrReady = showAdr and
+     adrTimeframeSupported and
+     not na(upperThirdLevel) and
+     not na(lowerThirdLevel) and
+     not na(upperFullLevel) and
+     not na(lowerFullLevel)
+
+if adrReady and newDailyPeriod
+    markerLeft = bar_index + adrMarkerOffsetBars
+    markerRight = markerLeft + adrMarkerLengthBars
+    labelX = markerRight + 1
+
+    currentUpperThirdLine := line.new(
+         markerLeft,
+         upperThirdLevel,
+         markerRight,
+         upperThirdLevel,
+         xloc = xloc.bar_index,
+         extend = extend.none,
+         color = adrColor,
+         style = line.style_solid,
+         width = adrMarkerWidth,
+         force_overlay = true
+    )
+
+    currentLowerThirdLine := line.new(
+         markerLeft,
+         lowerThirdLevel,
+         markerRight,
+         lowerThirdLevel,
+         xloc = xloc.bar_index,
+         extend = extend.none,
+         color = adrColor,
+         style = line.style_solid,
+         width = adrMarkerWidth,
+         force_overlay = true
+    )
+
+    currentUpperFullLine := line.new(
+         markerLeft,
+         upperFullLevel,
+         markerRight,
+         upperFullLevel,
+         xloc = xloc.bar_index,
+         extend = extend.none,
+         color = adrColor,
+         style = line.style_solid,
+         width = adrMarkerWidth,
+         force_overlay = true
+    )
+
+    currentLowerFullLine := line.new(
+         markerLeft,
+         lowerFullLevel,
+         markerRight,
+         lowerFullLevel,
+         xloc = xloc.bar_index,
+         extend = extend.none,
+         color = adrColor,
+         style = line.style_solid,
+         width = adrMarkerWidth,
+         force_overlay = true
+    )
+
+    currentUpperThirdLabel := label.new(
+         labelX,
+         upperThirdLevel,
+         "+1/3",
+         xloc = xloc.bar_index,
+         yloc = yloc.price,
+         style = label.style_label_left,
+         color = color.new(adrColor, 100),
+         textcolor = adrColor,
+         size = size.tiny,
+         textalign = text.align_left,
+         force_overlay = true
+    )
+
+    currentLowerThirdLabel := label.new(
+         labelX,
+         lowerThirdLevel,
+         "-1/3",
+         xloc = xloc.bar_index,
+         yloc = yloc.price,
+         style = label.style_label_left,
+         color = color.new(adrColor, 100),
+         textcolor = adrColor,
+         size = size.tiny,
+         textalign = text.align_left,
+         force_overlay = true
+    )
+
+    currentUpperFullLabel := label.new(
+         labelX,
+         upperFullLevel,
+         "+1",
+         xloc = xloc.bar_index,
+         yloc = yloc.price,
+         style = label.style_label_left,
+         color = color.new(adrColor, 100),
+         textcolor = adrColor,
+         size = size.tiny,
+         textalign = text.align_left,
+         force_overlay = true
+    )
+
+    currentLowerFullLabel := label.new(
+         labelX,
+         lowerFullLevel,
+         "-1",
+         xloc = xloc.bar_index,
+         yloc = yloc.price,
+         style = label.style_label_left,
+         color = color.new(adrColor, 100),
+         textcolor = adrColor,
+         size = size.tiny,
+         textalign = text.align_left,
+         force_overlay = true
+    )
+
+    array.push(adrLines, currentUpperThirdLine)
+    array.push(adrLines, currentLowerThirdLine)
+    array.push(adrLines, currentUpperFullLine)
+    array.push(adrLines, currentLowerFullLine)
+
+    array.push(adrLabels, currentUpperThirdLabel)
+    array.push(adrLabels, currentLowerThirdLabel)
+    array.push(adrLabels, currentUpperFullLabel)
+    array.push(adrLabels, currentLowerFullLabel)
+
+    maximumAdrObjects = adrHistory * 4
+
+    while array.size(adrLines) > maximumAdrObjects
+        oldAdrLine = array.shift(adrLines)
+        oldAdrLabel = array.shift(adrLabels)
+
+        if not na(oldAdrLine)
+            line.delete(oldAdrLine)
+
+        if not na(oldAdrLabel)
+            label.delete(oldAdrLabel)
+
+// Keep only the current day's markers just to the right of the latest bar.
+// Older days freeze at the last bar from their own session.
+if adrReady and
+     not na(currentUpperThirdLine) and
+     not na(currentLowerThirdLine) and
+     not na(currentUpperFullLine) and
+     not na(currentLowerFullLine)
+
+    markerLeft = bar_index + adrMarkerOffsetBars
+    markerRight = markerLeft + adrMarkerLengthBars
+    labelX = markerRight + 1
+
+    line.set_xy1(currentUpperThirdLine, markerLeft, upperThirdLevel)
+    line.set_xy2(currentUpperThirdLine, markerRight, upperThirdLevel)
+    line.set_xy1(currentLowerThirdLine, markerLeft, lowerThirdLevel)
+    line.set_xy2(currentLowerThirdLine, markerRight, lowerThirdLevel)
+    line.set_xy1(currentUpperFullLine, markerLeft, upperFullLevel)
+    line.set_xy2(currentUpperFullLine, markerRight, upperFullLevel)
+    line.set_xy1(currentLowerFullLine, markerLeft, lowerFullLevel)
+    line.set_xy2(currentLowerFullLine, markerRight, lowerFullLevel)
+
+    label.set_xy(currentUpperThirdLabel, labelX, upperThirdLevel)
+    label.set_xy(currentLowerThirdLabel, labelX, lowerThirdLevel)
+    label.set_xy(currentUpperFullLabel, labelX, upperFullLevel)
+    label.set_xy(currentLowerFullLabel, labelX, lowerFullLevel)
+
+// Merge close reference labels on every last-bar update. The function
+// safely no-ops when fewer than two eligible labels exist.
+if barstate.islast
+    combine_persistent_labels()
+//needed to add something diff
